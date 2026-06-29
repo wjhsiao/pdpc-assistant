@@ -32,7 +32,7 @@ export default defineConfig(() => {
             },
           ],
           // embeddings.json 可能超過 Workbox 預設的 2MB 快取上限
-          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+          maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         },
         manifest: {
           name: 'PDPC 個資法函釋查詢助理',
