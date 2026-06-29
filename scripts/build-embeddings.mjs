@@ -29,8 +29,8 @@ function extractEmbedText(fullText) {
 }
 
 async function main() {
-  console.log('載入 multilingual-e5-small 模型（首次需下載約 50MB）...');
-  const extractor = await pipeline('feature-extraction', 'Xenova/multilingual-e5-small', {
+  console.log('載入 bge-base-zh-v1.5 模型（首次需下載約 90MB）...');
+  const extractor = await pipeline('feature-extraction', 'Xenova/bge-base-zh-v1.5', {
     quantized: true,
   });
 
@@ -52,7 +52,7 @@ async function main() {
         continue;
       }
 
-      const text = `passage: ${article.條號} ${embedText}`;
+      const text = `${article.條號} ${embedText}`;
       const output = await extractor(text, { pooling: 'mean', normalize: true });
 
       embeddings.push({

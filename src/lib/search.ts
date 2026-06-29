@@ -79,7 +79,7 @@ function bm25Score(queryTokens: string[], doc: BM25Doc, idf: Map<string, number>
 function loadExtractor(): Promise<Extractor> {
   return (extractorPromise ??= pipeline(
     'feature-extraction',
-    'Xenova/multilingual-e5-small',
+    'Xenova/bge-base-zh-v1.5',
     { quantized: true },
   ).then(e => {
     extractor = e;
@@ -116,7 +116,7 @@ export async function search(query: string, topK = 5): Promise<SearchResult[]> {
   await initSearch();
 
   // 語意分數
-  const output = await extractor(`query: ${query}`, { pooling: 'mean', normalize: true });
+  const output = await extractor(`为这个句子生成表示以用于检索相关文章：${query}`, { pooling: 'mean', normalize: true });
   const queryVec = Array.from(output.data) as number[];
 
   if (storedDim !== null && queryVec.length !== storedDim) {
