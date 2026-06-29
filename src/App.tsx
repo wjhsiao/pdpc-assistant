@@ -1,31 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Scale, User, Bot, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { initSearch, search } from './lib/search';
-import pdpcData from './data/pdpc_data.json';
+import { initSearch, search, interpMap } from './lib/search';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-}
-
-// 建立查詢表：函釋字號 → { 條號, 發文日期, 全文, 來源URL }
-const interpMap = new Map<string, {
-  條號: string;
-  發文日期: string;
-  全文: string;
-  來源URL: string;
-}>();
-for (const article of pdpcData) {
-  for (const interp of article.函釋) {
-    interpMap.set(interp.函釋字號, {
-      條號: article.條號,
-      發文日期: interp.發文日期,
-      全文: interp.全文,
-      來源URL: interp.來源URL,
-    });
-  }
 }
 
 function extractYaoZhi(fullText: string): string {
@@ -36,7 +17,7 @@ function extractYaoZhi(fullText: string): string {
 function formatResults(results: Array<{ 函釋字號: string; 條號: string; score: number }>): string {
   if (results.length === 0) return '未找到相關函釋，請嘗試調整查詢用詞。';
 
-  const lines: string[] = [`找到 **${results.length}** 條相關函釋，依語意相似度排序：\n`];
+  const lines: string[] = [`找到 **${results.length}** 條相關函釋，依關聯度排序：\n`];
 
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
@@ -61,7 +42,7 @@ export default function App() {
     {
       id: '1',
       role: 'assistant',
-      content: '您好！請輸入查詢情境或關鍵字，系統將以語意搜尋找出最相關的個資法官方函釋。\n\n*（首次使用時，瀏覽器需下載語意模型約 50MB，請稍候。）*',
+      content: '您好！請輸入查詢情境或關鍵字，系統將以語意搜尋找出最相關的個資法官方函釋。\n\n*（首次使用時，瀏覽器需下載語意模型，請稍候。）*',
     },
   ]);
   const [input, setInput] = useState('');

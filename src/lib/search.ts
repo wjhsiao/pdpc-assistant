@@ -7,30 +7,33 @@ env.backends.onnx.wasm.numThreads = 1;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Extractor = any;
 
-let extractorPromise: Promise<Extractor> | null = null;
-let embeddingsPromise: Promise<void> | null = null;
-let extractor: Extractor = null;
-let embeddingsData: Array<{ 函釋字號: string; 條號: string; embedding: number[] }> | null = null;
-let storedDim: number | null = null;
+// ── 對外匯出的資料查詢表（App.tsx 用）────────────────────────────────────────
+export const interpMap = new Map<string, {
+  條號: string;
+  發文日期: string;
+  全文: string;
+  來源URL: string;
+}>();
+for (const article of pdpcData) {
+  for (const interp of article.函釋) {
+    interpMap.set(interp.函釋字號, {
+      條號: article.條號,
+      發文日期: interp.發文日期,
+      全文: interp.全文,
+      來源URL: interp.來源URL,
+    });
+  }
+}
 
 // ── BM25 ──────────────────────────────────────────────────────────────────────
 
 const K1 = 1.5, B = 0.75;
 
-// 中文字符 bigram 斷詞
 function bigrams(text: string): string[] {
   const clean = text.replace(/\s+/g, '');
   const out: string[] = [];
   for (let i = 0; i < clean.length - 1; i++) out.push(clean.slice(i, i + 2));
   return out;
-}
-
-// 每筆函釋的全文（含條號）
-const fullTextMap = new Map<string, string>();
-for (const article of pdpcData) {
-  for (const interp of article.函釋) {
-    fullTextMap.set(interp.函釋字號, `${article.條號} ${interp.全文}`);
-  }
 }
 
 interface BM25Doc { id: string; tf: Map<string, number>; len: number }
@@ -44,8 +47,8 @@ function getBM25Index(): BM25Index {
   const docs: BM25Doc[] = [];
   const df = new Map<string, number>();
 
-  for (const [id, text] of fullTextMap) {
-    const tokens = bigrams(text);
+  for (const [id, { 條號, 全文 }] of interpMap) {
+    const tokens = bigrams(`${條號} ${全文}`);
     const tf = new Map<string, number>();
     for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
     for (const t of tf.keys()) df.set(t, (df.get(t) ?? 0) + 1);
@@ -76,6 +79,9 @@ function bm25Score(queryTokens: string[], doc: BM25Doc, idf: Map<string, number>
 
 // ── 語意模型載入 ──────────────────────────────────────────────────────────────
 
+let extractorPromise: Promise<Extractor> | null = null;
+let extractor: Extractor = null;
+
 function loadExtractor(): Promise<Extractor> {
   return (extractorPromise ??= pipeline(
     'feature-extraction',
@@ -90,24 +96,36 @@ function loadExtractor(): Promise<Extractor> {
   }));
 }
 
+// ── Binary embeddings 載入 ────────────────────────────────────────────────────
+
+interface EmbeddingsMeta { dim: number; meta: Array<{ 函釋字號: string; 條號: string }> }
+
+let embeddingsPromise: Promise<void> | null = null;
+let embeddingsMeta: EmbeddingsMeta | null = null;
+let embeddingsBin: Float32Array | null = null;
+
 function loadEmbeddings(): Promise<void> {
-  return (embeddingsPromise ??= fetch('/embeddings.json')
-    .then(res => {
-      if (!res.ok) throw new Error(`無法載入向量資料：HTTP ${res.status}`);
-      return res.json();
-    })
-    .then((data: typeof embeddingsData) => {
-      embeddingsData = data;
-      if (data && data.length > 0) storedDim = data[0].embedding.length;
-    })
-    .catch(err => {
-      embeddingsPromise = null;
-      throw err;
-    }));
+  return (embeddingsPromise ??= Promise.all([
+    fetch('/embeddings-meta.json').then(r => {
+      if (!r.ok) throw new Error(`無法載入 embeddings-meta.json：HTTP ${r.status}`);
+      return r.json() as Promise<EmbeddingsMeta>;
+    }),
+    fetch('/embeddings.bin').then(r => {
+      if (!r.ok) throw new Error(`無法載入 embeddings.bin：HTTP ${r.status}`);
+      return r.arrayBuffer();
+    }),
+  ]).then(([meta, buf]) => {
+    embeddingsMeta = meta;
+    embeddingsBin = new Float32Array(buf);
+  }).catch(err => {
+    embeddingsPromise = null;
+    throw err;
+  }));
 }
 
 export async function initSearch(): Promise<void> {
   await Promise.all([loadExtractor(), loadEmbeddings()]);
+  getBM25Index(); // 預熱 BM25，避免第一次搜尋時才建立
 }
 
 export interface SearchResult { 函釋字號: string; 條號: string; score: number }
@@ -115,12 +133,15 @@ export interface SearchResult { 函釋字號: string; 條號: string; score: num
 export async function search(query: string, topK = 5): Promise<SearchResult[]> {
   await initSearch();
 
+  const { dim, meta } = embeddingsMeta!;
+  const bin = embeddingsBin!;
+
   // 語意分數
   const output = await extractor(`为这个句子生成表示以用于检索相关文章：${query}`, { pooling: 'mean', normalize: true });
-  const queryVec = Array.from(output.data) as number[];
+  const queryVec: Float32Array = output.data;
 
-  if (storedDim !== null && queryVec.length !== storedDim) {
-    throw new Error(`向量維度不匹配（模型 ${queryVec.length} vs 儲存 ${storedDim}）。請重新執行 npm run build:embeddings。`);
+  if (queryVec.length !== dim) {
+    throw new Error(`向量維度不匹配（模型 ${queryVec.length} vs 儲存 ${dim}）。請重新執行 npm run build:embeddings。`);
   }
 
   // BM25 分數
@@ -133,20 +154,17 @@ export async function search(query: string, topK = 5): Promise<SearchResult[]> {
     bm25Scores.set(doc.id, s);
     if (s > maxBM25) maxBM25 = s;
   }
-  // 正規化至 [0, 1]
   if (maxBM25 > 0) {
     for (const [id, s] of bm25Scores) bm25Scores.set(id, s / maxBM25);
   }
 
   // 混合排序：語意 50% + BM25 50%
-  const scored = embeddingsData!.map(e => {
-    const semantic = e.embedding.reduce((sum, v, i) => sum + v * queryVec[i], 0);
-    const keyword = bm25Scores.get(e.函釋字號) ?? 0;
-    return {
-      函釋字號: e.函釋字號,
-      條號: e.條號,
-      score: 0.5 * semantic + 0.5 * keyword,
-    };
+  const scored = meta.map((m, i) => {
+    const offset = i * dim;
+    let semantic = 0;
+    for (let j = 0; j < dim; j++) semantic += bin[offset + j] * queryVec[j];
+    const keyword = bm25Scores.get(m.函釋字號) ?? 0;
+    return { 函釋字號: m.函釋字號, 條號: m.條號, score: 0.5 * semantic + 0.5 * keyword };
   });
 
   return scored.sort((a, b) => b.score - a.score).slice(0, topK);
