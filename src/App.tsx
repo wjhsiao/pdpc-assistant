@@ -73,7 +73,7 @@ export default function App() {
   useEffect(() => {
     // C6 fix: 預熱失敗時顯示錯誤，而非靜默 console.error
     initSearch().then(() => { modelReady = true; }).catch(err => {
-      setInitError('語意模型載入失敗，請確認網路連線後重新整理頁面。');
+      setInitError(`語意模型載入失敗，請重新整理頁面。(${err instanceof Error ? err.message : String(err)})`);
       console.error('initSearch failed:', err);
     });
   }, []);

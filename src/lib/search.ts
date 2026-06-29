@@ -1,6 +1,8 @@
 import { pipeline, env } from '@xenova/transformers';
 
 env.allowLocalModels = false;
+// 強制單執行緒，修復行動裝置 ONNX Runtime 初始化失敗
+env.backends.onnx.wasm.numThreads = 1;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Extractor = any;
