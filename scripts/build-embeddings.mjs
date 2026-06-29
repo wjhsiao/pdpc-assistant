@@ -15,11 +15,17 @@ env.allowLocalModels = false;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 
-function extractYaoZhi(fullText) {
-  const match = fullText.match(/要旨([\s\S]*?)(?:主旨|說明|正本|$)/);
-  const yaoZhi = match ? match[1].trim() : '';
-  // C8 fix: 若 regex 匹配但捕獲為空，回退到全文前 400 字
-  return yaoZhi || fullText.substring(0, 400);
+// 提取要旨 + 主旨 + 說明前段，讓嵌入文字更豐富、更有區分度
+function extractEmbedText(fullText) {
+  const extract = (pattern) => {
+    const m = fullText.match(pattern);
+    return m ? m[1].trim() : '';
+  };
+  const yaoZhi  = extract(/要旨([\s\S]*?)(?:主旨|說明|正本|$)/);
+  const zhuZhi  = extract(/主旨([\s\S]*?)(?:說明|正本|$)/).substring(0, 200);
+  const shuoMing = extract(/說明([\s\S]*?)(?:正本|$)/).substring(0, 300);
+  const combined = [yaoZhi, zhuZhi, shuoMing].filter(Boolean).join(' ');
+  return combined || fullText.substring(0, 500);
 }
 
 async function main() {
@@ -38,16 +44,15 @@ async function main() {
   let skipped = 0;
   for (const article of pdpcData) {
     for (const interp of article.函釋) {
-      const yaoZhi = extractYaoZhi(interp.全文);
+      const embedText = extractEmbedText(interp.全文);
 
-      // C8 fix: 驗證文字非空，防止 garbage embedding
-      if (!yaoZhi) {
+      if (!embedText) {
         console.warn(`\n⚠ 跳過 ${interp.函釋字號}：無法提取有效內容`);
         skipped++;
         continue;
       }
 
-      const text = `passage: ${article.條號} ${yaoZhi}`;
+      const text = `passage: ${article.條號} ${embedText}`;
       const output = await extractor(text, { pooling: 'mean', normalize: true });
 
       embeddings.push({

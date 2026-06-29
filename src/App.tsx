@@ -45,7 +45,7 @@ function formatResults(results: Array<{ 函釋字號: string; 條號: string; sc
 
     const yaoZhi = extractYaoZhi(data.全文);
     lines.push('---');
-    lines.push(`### ${i + 1}. ${data.條號}｜${r.函釋字號}`);
+    lines.push(`### ${i + 1}. ${data.條號}｜${r.函釋字號} · ${(r.score * 100).toFixed(1)}%`);
     lines.push(`📅 發文日期：${data.發文日期}\n`);
     lines.push(`**要旨**\n\n${yaoZhi}\n`);
     lines.push(`[查看原文 →](${data.來源URL})\n`);
