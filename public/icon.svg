@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#0f172a"/>
+  <!-- stem -->
+  <rect x="244" y="96" width="24" height="320" rx="8" fill="#3b82f6"/>
+  <!-- top bar -->
+  <rect x="96" y="104" width="320" height="24" rx="8" fill="#3b82f6"/>
+  <!-- left arm -->
+  <rect x="100" y="128" width="12" height="88" rx="6" fill="#3b82f6"/>
+  <!-- right arm -->
+  <rect x="400" y="128" width="12" height="88" rx="6" fill="#3b82f6"/>
+  <!-- left pan -->
+  <path d="M68 220 Q112 268 156 220" stroke="#3b82f6" stroke-width="14" fill="none" stroke-linecap="round"/>
+  <line x1="68" y1="220" x2="156" y2="220" stroke="#3b82f6" stroke-width="14" stroke-linecap="round"/>
+  <!-- right pan -->
+  <path d="M356 220 Q400 268 444 220" stroke="#3b82f6" stroke-width="14" fill="none" stroke-linecap="round"/>
+  <line x1="356" y1="220" x2="444" y2="220" stroke="#3b82f6" stroke-width="14" stroke-linecap="round"/>
+  <!-- base -->
+  <rect x="196" y="416" width="120" height="20" rx="8" fill="#3b82f6"/>
+</svg>

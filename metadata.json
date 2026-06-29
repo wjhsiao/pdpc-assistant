@@ -1,0 +1,6 @@
+{
+  "name": "PDPC Legal Assistant",
+  "description": "A professional Personal Data Protection Act legal assistant that interprets natural language scenarios against official regulations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
