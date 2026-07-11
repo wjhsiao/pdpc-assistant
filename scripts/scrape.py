@@ -87,7 +87,7 @@ def fetch_interp_urls(session, list_url):
 
     # 頁面裡的 href 是完整絕對 URL
     found = re.findall(
-        r'href="(https?://www\.pdpc\.gov\.tw/News_Content/102/\d+)"',
+        r'href="(https?://www\.pdpc\.gov\.tw/News_Content/102/\d+)/?\"',
         resp.text
     )
     seen = set()
