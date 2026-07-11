@@ -1,0 +1,62 @@
+name: Update PDPC 函釋資料
+
+on:
+  schedule:
+    # 每週一 09:00 台灣時間（UTC+8 = UTC 01:00）
+    - cron: '0 1 * * 1'
+  workflow_dispatch: # 支援手動觸發
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: pip install requests
+
+      - name: Run scraper
+        run: python scripts/scrape.py
+
+      - name: Check for data changes
+        id: check
+        run: |
+          if git diff --quiet src/data/pdpc_data.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "無新函釋，結束。"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "偵測到新函釋，準備重建 embeddings。"
+          fi
+
+      - name: Set up Node.js
+        if: steps.check.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node deps
+        if: steps.check.outputs.changed == 'true'
+        run: npm ci
+
+      - name: Rebuild embeddings
+        if: steps.check.outputs.changed == 'true'
+        run: npm run build:embeddings
+
+      - name: Commit and push
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/data/pdpc_data.json public/embeddings.bin public/embeddings-meta.json
+          git commit -m "auto: update PDPC 函釋資料 $(date '+%Y-%m-%d')"
+          git push
