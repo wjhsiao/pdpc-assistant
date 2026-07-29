@@ -46,7 +46,7 @@ jobs:
 
       - name: Install Node deps
         if: steps.check.outputs.changed == 'true'
-        run: npm ci
+        run: npm install
 
       - name: Rebuild embeddings
         if: steps.check.outputs.changed == 'true'
