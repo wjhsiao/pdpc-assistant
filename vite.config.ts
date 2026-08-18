@@ -34,21 +34,11 @@ export default defineConfig(() => {
           // embeddings.json 可能超過 Workbox 預設的 2MB 快取上限
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         },
-        manifest: {
-          name: 'PDPC 個資法函釋查詢助理',
-          short_name: 'PDPC 函釋',
-          description: '個人資料保護法官方函釋語意搜尋，純前端、離線可用',
-          theme_color: '#0f172a',
-          background_color: '#f1f5f9',
-          display: 'standalone',
-          orientation: 'portrait',
-          scope: '/',
-          start_url: '/',
-          // C5 fix: 使用 SVG（sizes:'any'），避免需維護多個 PNG 尺寸
-          icons: [
-            { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml' },
-          ],
-        },
+        // manifest 關閉自動產生/注入：/ 和 /ai 需要各自獨立的 manifest
+        // （不同 name/icon/start_url），才能在手機分別加入主畫面成兩個獨立捷徑。
+        // 改成手寫兩份靜態檔（public/manifest.webmanifest、
+        // public/manifest-ai.webmanifest），各自的 html 手動 <link> 過去。
+        manifest: false,
       }),
     ],
     optimizeDeps: {

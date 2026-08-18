@@ -1,0 +1,14 @@
+{
+  "name": "PDPC 個資法函釋查詢助理",
+  "short_name": "PDPC 函釋",
+  "description": "個人資料保護法官方函釋語意搜尋，純前端、離線可用",
+  "theme_color": "#0f172a",
+  "background_color": "#f1f5f9",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
