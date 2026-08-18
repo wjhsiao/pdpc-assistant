@@ -1,13 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, ChevronDown, AlertTriangle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { search, interpMap } from './lib/search';
+import { search, interpMap, getArticleText } from './lib/search';
 
 // 低於此分數視為「查無相關函釋」，不呼叫 LLM（省 token）。
 // 分數 = 0.5*語意相似度 + 0.5*BM25標準化分數，經驗閾值，可視實際查詢調整。
 const RELEVANCE_THRESHOLD = 0.15;
 
+// 從回答文字裡抓「XXX字第123號」格式的函釋字號候選，用來驗證 AI 有沒有引用
+// 超出本次提供範圍（或根本不存在）的函釋。全庫 160 筆函釋字號實測皆符合此格式。
+const CITATION_PATTERN = /[^\s，。、！？：「」『』（）()]*?字第[0-9]+號/g;
+
+function extractCitationTokens(text: string): string[] {
+  const matches = text.match(CITATION_PATTERN) ?? [];
+  return [...new Set(matches)];
+}
+
 interface Citation { 函釋字號: string; 條號: string; 來源URL: string }
+interface SourceDoc { 函釋字號: string; 條號: string; 全文: string; 來源URL: string }
 
 interface Turn {
   id: string;
@@ -15,6 +25,8 @@ interface Turn {
   status: 'loading' | 'no-match' | 'answered' | 'error';
   answer?: string;
   citations?: Citation[];
+  flaggedCitations?: string[];
+  sources?: SourceDoc[];
   errorMessage?: string;
 }
 
@@ -69,10 +81,19 @@ export default function AiPanel({ modelStatus, initError }: Props) {
           return true;
         });
 
+      // 送給 Gemini 的法條原文：本次候選函釋涉及的條號各取一次，避免重複
+      const articleNos = [...new Set(contexts.map(c => c.條號))];
+      const articles = articleNos
+        .map(條號 => {
+          const 條文內容 = getArticleText(條號);
+          return 條文內容 ? { 條號, 條文內容 } : null;
+        })
+        .filter((a): a is NonNullable<typeof a> => a !== null);
+
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, contexts }),
+        body: JSON.stringify({ question, contexts, articles }),
       });
 
       if (!res.ok) {
@@ -86,7 +107,15 @@ export default function AiPanel({ modelStatus, initError }: Props) {
       const citations: Citation[] = (cited.length > 0 ? cited : contexts)
         .map(c => ({ 函釋字號: c.函釋字號, 條號: c.條號, 來源URL: c.來源URL }));
 
-      setTurns(prev => prev.map(t => t.id === id ? { ...t, status: 'answered', answer: data.answer, citations } : t));
+      // 引用驗證：回答文字裡出現的函釋字號，若不在本次送出的 contexts 範圍內，標記出來提醒使用者
+      const sentIds = new Set(contexts.map(c => c.函釋字號));
+      const flaggedCitations = extractCitationTokens(data.answer).filter(token => !sentIds.has(token));
+
+      const sources: SourceDoc[] = contexts;
+
+      setTurns(prev => prev.map(t => t.id === id
+        ? { ...t, status: 'answered', answer: data.answer, citations, flaggedCitations, sources }
+        : t));
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '未知錯誤';
       setTurns(prev => prev.map(t => t.id === id ? { ...t, status: 'error', errorMessage: msg } : t));
@@ -155,6 +184,39 @@ export default function AiPanel({ modelStatus, initError }: Props) {
                       </a>
                     ))}
                   </div>
+                )}
+
+                {turn.flaggedCitations && turn.flaggedCitations.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-amber-200 flex flex-col gap-1.5">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      引用範圍提醒
+                    </div>
+                    <div className="text-[12px] text-amber-700 leading-[1.5]">
+                      回答中提到「{turn.flaggedCitations.join('、')}」，
+                      {turn.flaggedCitations.some(t => interpMap.has(t))
+                        ? '不在本次實際提供給 AI 的函釋範圍內，請自行查證。'
+                        : '在資料庫中找不到對應資料，可能是 AI 誤植或杜撰的字號，請勿直接採信。'}
+                    </div>
+                  </div>
+                )}
+
+                {turn.sources && turn.sources.length > 0 && (
+                  <details className="mt-3 pt-3 border-t border-[#e2e8f0]">
+                    <summary className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.05em] text-[#94a3b8] cursor-pointer select-none [&::-webkit-details-marker]:hidden">
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      本次參考原文（{turn.sources.length} 則）
+                    </summary>
+                    <div className="mt-2 flex flex-col gap-3">
+                      {turn.sources.map(s => (
+                        <div key={s.函釋字號} className="bg-white border border-[#e2e8f0] rounded-xl p-3 text-[12px] text-[#475569] leading-[1.6]">
+                          <div className="font-semibold text-[#1e293b] mb-1">{s.條號}｜{s.函釋字號}</div>
+                          <p className="whitespace-pre-wrap line-clamp-6">{s.全文}</p>
+                          <a href={s.來源URL} target="_blank" rel="noreferrer" className="text-[#8b5cf6] hover:underline">查看原文 →</a>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 )}
               </div>
             )}

@@ -5,15 +5,22 @@ const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 interface Context { 函釋字號: string; 條號: string; 全文: string; 來源URL: string }
+interface ArticleText { 條號: string; 條文內容: string }
 
-interface AskRequestBody { question?: string; contexts?: Context[] }
+interface AskRequestBody { question?: string; contexts?: Context[]; articles?: ArticleText[] }
 
-function buildPrompt(question: string, contexts: Context[]): string {
+function buildPrompt(question: string, contexts: Context[], articles: ArticleText[]): string {
+  const articleBlock = articles
+    .map(a => `【法條】${a.條號}\n${a.條文內容}`)
+    .join('\n\n');
+
   const contextBlock = contexts
     .map((c, i) => `【函釋 ${i + 1}】條號：${c.條號}｜函釋字號：${c.函釋字號}\n全文：${c.全文}`)
     .join('\n\n');
 
-  return `你是台灣個人資料保護法（個資法）的法律助理。請嚴格依據下方提供的官方函釋回答使用者的問題，不得引用函釋以外的法規知識或臆測。
+  return `你是台灣個人資料保護法（個資法）的法律助理。請嚴格依據下方提供的法條原文與官方函釋回答使用者的問題，不得引用這些資料以外的法規知識或臆測，也不得引用、杜撰任何不在下方清單中的函釋字號。
+
+${articleBlock}
 
 ${contextBlock}
 
@@ -21,8 +28,8 @@ ${contextBlock}
 
 回答要求：
 1. 用清楚易懂的自然語言說明個資法如何適用於使用者的情境，可使用 Markdown。
-2. 若提供的函釋不足以完整回答，明確說明哪個部分無法從函釋中得出結論，不要臆測。
-3. 回答結尾另起一段，列出「引用函釋：」，逐一列出你實際引用的函釋字號（只列有實際用到的，不必全部5則都列）。`;
+2. 若提供的資料不足以完整回答，明確說明哪個部分無法從中得出結論，不要臆測。
+3. 回答結尾另起一段，列出「引用函釋：」，逐一列出你實際引用的函釋字號（只列有實際用到的，且必須是上方【函釋】清單中出現過的字號，不可自行編造，不必全部列出）。`;
 }
 
 export default async function handler(req: any, res: any) {
@@ -38,7 +45,7 @@ export default async function handler(req: any, res: any) {
   }
 
   const body: AskRequestBody = req.body ?? {};
-  const { question, contexts } = body;
+  const { question, contexts, articles } = body;
 
   if (!question || typeof question !== 'string') {
     res.status(400).json({ error: 'question 為必填字串' });
@@ -50,7 +57,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const prompt = buildPrompt(question, contexts);
+    const prompt = buildPrompt(question, contexts, Array.isArray(articles) ? articles : []);
 
     const geminiRes = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
       method: 'POST',

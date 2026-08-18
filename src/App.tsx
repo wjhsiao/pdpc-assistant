@@ -14,6 +14,7 @@ export default function App() {
   const [page, setPage] = useState<Page>(initialPage);
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [initError, setInitError] = useState<string | null>(null);
+  const [dataUpdatedAt, setDataUpdatedAt] = useState<string | null>(null);
 
   useEffect(() => {
     // C6 fix: 預熱失敗時顯示錯誤，而非靜默 console.error
@@ -22,6 +23,11 @@ export default function App() {
       setModelStatus('error');
       console.error('initSearch failed:', err);
     });
+
+    fetch('/data-updated.json')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.updatedAt) setDataUpdatedAt(data.updatedAt); })
+      .catch(() => {}); // 純資訊性質，抓不到就不顯示，不影響主功能
   }, []);
 
   const switchTo = (next: Page) => {
@@ -41,9 +47,14 @@ export default function App() {
             <div className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${page === 'ai' ? 'bg-[#8b5cf6]' : 'bg-[#3b82f6]'}`}>
               {page === 'ai' ? <Sparkles className="w-5 h-5 text-white" /> : <Scale className="w-5 h-5 text-white" />}
             </div>
-            <h1 className="font-extrabold text-[18px] sm:text-[20px] tracking-[-0.5px]">
-              {page === 'ai' ? 'PDPC AI 問答' : 'PDPC 個資法函釋助理'}
-            </h1>
+            <div>
+              <h1 className="font-extrabold text-[18px] sm:text-[20px] tracking-[-0.5px] leading-tight">
+                {page === 'ai' ? 'PDPC AI 問答' : 'PDPC 個資法函釋助理'}
+              </h1>
+              {dataUpdatedAt && (
+                <div className="text-[11px] text-white/50 leading-tight">函釋資料更新至 {dataUpdatedAt}</div>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-1 bg-white/10 rounded-lg p-1">

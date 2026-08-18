@@ -34,6 +34,13 @@ export const articleList: ArticleSummary[] = pdpcData.map(a => ({
   count: a.函釋.length,
 }));
 
+// 條號 → 條文內容 查表（/ai 送給 Gemini 的法條原文用，見 AiPanel.tsx）
+const articleTextMap = new Map<string, string>(pdpcData.map(a => [a.條號, a.條文內容]));
+
+export function getArticleText(article: string): string | undefined {
+  return articleTextMap.get(article);
+}
+
 export interface InterpDetail { 函釋字號: string; 條號: string; 發文日期: string; 全文: string; 來源URL: string }
 
 // 注意：同一則函釋可能同時掛在多條之下（原始資料重複列出），
