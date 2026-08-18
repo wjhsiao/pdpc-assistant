@@ -1,7 +1,7 @@
 // Vercel Serverless Function：接收前端已檢索好的 top-5 函釋，交給 Gemini 生成自然語言回答。
 // GEMINI_API_KEY 從 Vercel 環境變數讀取，不進 git、不進 browser bundle。
 
-import { findInvalidCitations, formatCitationNumber } from './_lib/citations';
+import { findInvalidCitations, formatCitationNumber } from './_lib/citations.js';
 
 const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
