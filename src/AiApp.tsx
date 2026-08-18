@@ -58,13 +58,20 @@ export default function AiApp() {
         return;
       }
 
+      // 同一則函釋可能同時掛在多條之下，top-5 結果去重，避免同一函釋重複佔位、
+      // 也避免把重複的全文送給 LLM 浪費 token
+      const seen = new Set<string>();
       const contexts = results
         .map(r => {
           const data = interpMap.get(r.函釋字號);
           if (!data) return null;
           return { 函釋字號: r.函釋字號, 條號: data.條號, 全文: data.全文, 來源URL: data.來源URL };
         })
-        .filter((c): c is NonNullable<typeof c> => c !== null);
+        .filter((c): c is NonNullable<typeof c> => {
+          if (c === null || seen.has(c.函釋字號)) return false;
+          seen.add(c.函釋字號);
+          return true;
+        });
 
       const res = await fetch('/api/ask', {
         method: 'POST',
@@ -78,7 +85,10 @@ export default function AiApp() {
       }
 
       const data = await res.json() as { answer: string };
-      const citations: Citation[] = contexts.map(c => ({ 函釋字號: c.函釋字號, 條號: c.條號, 來源URL: c.來源URL }));
+      // 只顯示模型回答內文中實際提到的函釋字號；一個都比對不到時退回顯示全部 contexts
+      const cited = contexts.filter(c => data.answer.includes(c.函釋字號));
+      const citations: Citation[] = (cited.length > 0 ? cited : contexts)
+        .map(c => ({ 函釋字號: c.函釋字號, 條號: c.條號, 來源URL: c.來源URL }));
 
       setTurns(prev => prev.map(t => t.id === id ? { ...t, status: 'answered', answer: data.answer, citations } : t));
     } catch (error: unknown) {
