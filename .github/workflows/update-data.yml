@@ -54,7 +54,8 @@ jobs:
 
       - name: Write data-updated timestamp
         # 不論這次有沒有抓到新函釋都寫，代表「系統最後一次確認過的時間」
-        run: echo "{\"updatedAt\": \"$(date -u '+%Y-%m-%d')\"}" > public/data-updated.json
+        run: |
+          echo "{\"updatedAt\": \"$(date -u '+%Y-%m-%d')\"}" > public/data-updated.json
 
       - name: Commit and push
         run: |
