@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, ChevronDown, AlertTriangle } from 'lucide-react';
+import { Send, Loader2, ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { search, interpMap, getArticleText } from './lib/search';
 
@@ -7,8 +7,9 @@ import { search, interpMap, getArticleText } from './lib/search';
 // 分數 = 0.5*語意相似度 + 0.5*BM25標準化分數，經驗閾值，可視實際查詢調整。
 const RELEVANCE_THRESHOLD = 0.15;
 
-// 從回答文字裡抓「XXX字第123號」格式的函釋字號候選，用來驗證 AI 有沒有引用
-// 超出本次提供範圍（或根本不存在）的函釋。全庫 160 筆函釋字號實測皆符合此格式。
+// 從回答文字裡抓「XXX字第123號」格式的函釋字號候選。伺服器端（api/ask.ts）
+// 已經做過同樣的驗證＋重試，正常情況不會有查無對應資料的引用流到這裡；
+// 這裡是最後一道防線，一旦查到還是有，直接判定整輪失敗，不可照樣顯示。
 const CITATION_PATTERN = /[^\s，。、！？：「」『』（）()]*?字第[0-9]+號/g;
 
 function extractCitationTokens(text: string): string[] {
@@ -25,7 +26,6 @@ interface Turn {
   status: 'loading' | 'no-match' | 'answered' | 'error';
   answer?: string;
   citations?: Citation[];
-  flaggedCitations?: string[];
   sources?: SourceDoc[];
   errorMessage?: string;
 }
@@ -102,19 +102,27 @@ export default function AiPanel({ modelStatus, initError }: Props) {
       }
 
       const data = await res.json() as { answer: string };
+
+      // 最後一道防線：伺服器端已驗證過引用範圍，這裡再查一次，
+      // 一旦仍有查無對應資料的引用，整輪判定失敗，絕不照樣顯示答案。
+      const sentIds = new Set(contexts.map(c => c.函釋字號));
+      const stillInvalid = extractCitationTokens(data.answer).filter(token => !sentIds.has(token));
+      if (stillInvalid.length > 0) {
+        setTurns(prev => prev.map(t => t.id === id
+          ? { ...t, status: 'error', errorMessage: `回答引用了查無對應資料的函釋字號（${stillInvalid.join('、')}），已中止顯示。` }
+          : t));
+        return;
+      }
+
       // 只顯示模型回答內文中實際提到的函釋字號；一個都比對不到時退回顯示全部 contexts
       const cited = contexts.filter(c => data.answer.includes(c.函釋字號));
       const citations: Citation[] = (cited.length > 0 ? cited : contexts)
         .map(c => ({ 函釋字號: c.函釋字號, 條號: c.條號, 來源URL: c.來源URL }));
 
-      // 引用驗證：回答文字裡出現的函釋字號，若不在本次送出的 contexts 範圍內，標記出來提醒使用者
-      const sentIds = new Set(contexts.map(c => c.函釋字號));
-      const flaggedCitations = extractCitationTokens(data.answer).filter(token => !sentIds.has(token));
-
       const sources: SourceDoc[] = contexts;
 
       setTurns(prev => prev.map(t => t.id === id
-        ? { ...t, status: 'answered', answer: data.answer, citations, flaggedCitations, sources }
+        ? { ...t, status: 'answered', answer: data.answer, citations, sources }
         : t));
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '未知錯誤';
@@ -183,21 +191,6 @@ export default function AiPanel({ modelStatus, initError }: Props) {
                         {c.條號}｜{c.函釋字號} →
                       </a>
                     ))}
-                  </div>
-                )}
-
-                {turn.flaggedCitations && turn.flaggedCitations.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-amber-200 flex flex-col gap-1.5">
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-700">
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      引用範圍提醒
-                    </div>
-                    <div className="text-[12px] text-amber-700 leading-[1.5]">
-                      回答中提到「{turn.flaggedCitations.join('、')}」，
-                      {turn.flaggedCitations.some(t => interpMap.has(t))
-                        ? '不在本次實際提供給 AI 的函釋範圍內，請自行查證。'
-                        : '在資料庫中找不到對應資料，可能是 AI 誤植或杜撰的字號，請勿直接採信。'}
-                    </div>
                   </div>
                 )}
 
