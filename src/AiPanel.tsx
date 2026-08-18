@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Loader2, ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { search, interpMap, getArticleText } from './lib/search';
-import { findInvalidCitations, formatCitationNumber } from './lib/citations';
+import { findInvalidCitations, formatCitationNumber } from '../api/_lib/citations';
 
 // 低於此分數視為「查無相關函釋」，不呼叫 LLM（省 token）。
 // 分數 = 0.5*語意相似度 + 0.5*BM25標準化分數，經驗閾值，可視實際查詢調整。

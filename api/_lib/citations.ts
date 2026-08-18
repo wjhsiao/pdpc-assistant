@@ -1,4 +1,10 @@
-// 函釋字號引用驗證共用邏輯（api/ask.ts 與 AiPanel.tsx 共用，避免各自維護一份會漏改）。
+// 函釋字號引用驗證共用邏輯（api/ask.ts 與 src/AiPanel.tsx 共用，避免各自維護一份會漏改）。
+//
+// 放在 api/_lib/ 而不是 src/lib/：Vercel 的 serverless function 打包只會追蹤
+// api/ 目錄底下的相依檔案，從 api/ash.ts import 專案外（例如 src/）的檔案在
+// runtime 會出現 ERR_MODULE_NOT_FOUND（實測過，見 commit）。放在 api/ 底下、
+// 檔名加底線前綴，Vercel 不會把它當成路由，但函式的相依追蹤看得到它；
+// 前端（Vite）沒有這個限制，可以照樣從 src/ 外面 import 這個檔案。
 //
 // 原本用「排除清單」規則猜整段字號的邊界（例如排除標點、空白），但 Markdown 粗體符號
 // (*, _ 等) 或行內散文都不在排除清單裡，會被誤判進字號裡，導致明明是正確的引用被判定
