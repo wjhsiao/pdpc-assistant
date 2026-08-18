@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Scale, User, Bot, Loader2 } from 'lucide-react';
+import { Send, Scale, User, Bot, Loader2, List } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { initSearch, search, interpMap } from './lib/search';
+import { initSearch, search, interpMap, articleList, getInterpsByArticle, type InterpDetail } from './lib/search';
 
 interface Message {
   id: string;
@@ -35,6 +35,24 @@ function formatResults(results: Array<{ 函釋字號: string; 條號: string; sc
   return lines.join('\n');
 }
 
+function formatArticleResults(article: string, interps: InterpDetail[]): string {
+  if (interps.length === 0) return `${article} 目前沒有相關函釋。`;
+
+  const lines: string[] = [`**${article}** 共 **${interps.length}** 則函釋，依發文日期新到舊排序：\n`];
+
+  for (let i = 0; i < interps.length; i++) {
+    const data = interps[i];
+    const yaoZhi = extractYaoZhi(data.全文);
+    lines.push('---');
+    lines.push(`### ${i + 1}. ${data.函釋字號}`);
+    lines.push(`📅 發文日期：${data.發文日期}\n`);
+    lines.push(`**要旨**\n\n${yaoZhi}\n`);
+    lines.push(`[查看原文 →](${data.來源URL})\n`);
+  }
+
+  return lines.join('\n');
+}
+
 let modelReady = false;
 
 export default function App() {
@@ -50,6 +68,8 @@ export default function App() {
   const [loadingMessage, setLoadingMessage] = useState('正在為您檢索法規與函釋...');
   const [initError, setInitError] = useState<string | null>(null);
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [mode, setMode] = useState<'keyword' | 'article'>('keyword');
+  const [selectedArticle, setSelectedArticle] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -91,6 +111,15 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleArticleSelect = (article: string) => {
+    setSelectedArticle(article);
+    if (!article) return;
+    const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: `瀏覽 ${article} 所有函釋` };
+    const interps = getInterpsByArticle(article);
+    const content = formatArticleResults(article, interps);
+    setMessages(prev => [...prev, userMessage, { id: crypto.randomUUID(), role: 'assistant', content }]);
   };
 
   return (
@@ -160,30 +189,73 @@ export default function App() {
 
         {/* Input Area */}
         <footer className="col-span-4 bg-white rounded-2xl border border-[#e2e8f0] border-l-4 border-l-[#3b82f6] shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05)] p-5 flex flex-col justify-center">
-          <div className="text-[10px] font-bold uppercase tracking-[0.05em] text-[#64748b] mb-2">輸入查詢情境</div>
-          <form onSubmit={handleSubmit} className="flex items-end gap-3 w-full">
-            <textarea
-              className="flex-1 max-h-32 min-h-[44px] bg-[#f8fafc] border border-[#e2e8f0] rounded-xl resize-none outline-none p-3 text-[14px] text-[#1e293b] placeholder:text-[#94a3b8] focus:ring-2 focus:ring-[#3b82f6] focus:border-transparent transition-all"
-              placeholder="例如：公司要求全體員工配戴全名名牌是否違反個資法？"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSubmit(e);
-                }
-              }}
-              rows={1}
-            />
+          <div className="flex items-center gap-1 mb-3 bg-[#f1f5f9] rounded-lg p-1 w-fit">
             <button
-              type="submit"
-              disabled={!input.trim() || isLoading}
-              className="shrink-0 bg-[#3b82f6] hover:bg-blue-600 disabled:bg-[#e2e8f0] disabled:text-[#94a3b8] disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-semibold text-[14px] transition-colors h-[44px] flex items-center justify-center border-none"
+              type="button"
+              onClick={() => setMode('keyword')}
+              className={`px-3 py-1.5 rounded-md text-[12px] font-semibold transition-colors border-none ${
+                mode === 'keyword' ? 'bg-white text-[#1e293b] shadow-sm' : 'bg-transparent text-[#64748b]'
+              }`}
             >
-              <Send className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">搜尋</span>
+              關鍵字搜尋
             </button>
-          </form>
+            <button
+              type="button"
+              onClick={() => setMode('article')}
+              className={`px-3 py-1.5 rounded-md text-[12px] font-semibold transition-colors border-none flex items-center gap-1 ${
+                mode === 'article' ? 'bg-white text-[#1e293b] shadow-sm' : 'bg-transparent text-[#64748b]'
+              }`}
+            >
+              <List className="w-3.5 h-3.5" />
+              依條號瀏覽
+            </button>
+          </div>
+
+          {mode === 'keyword' ? (
+            <>
+              <div className="text-[10px] font-bold uppercase tracking-[0.05em] text-[#64748b] mb-2">輸入查詢情境</div>
+              <form onSubmit={handleSubmit} className="flex items-end gap-3 w-full">
+                <textarea
+                  className="flex-1 max-h-32 min-h-[44px] bg-[#f8fafc] border border-[#e2e8f0] rounded-xl resize-none outline-none p-3 text-[14px] text-[#1e293b] placeholder:text-[#94a3b8] focus:ring-2 focus:ring-[#3b82f6] focus:border-transparent transition-all"
+                  placeholder="例如：公司要求全體員工配戴全名名牌是否違反個資法？"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSubmit(e);
+                    }
+                  }}
+                  rows={1}
+                />
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isLoading}
+                  className="shrink-0 bg-[#3b82f6] hover:bg-blue-600 disabled:bg-[#e2e8f0] disabled:text-[#94a3b8] disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-semibold text-[14px] transition-colors h-[44px] flex items-center justify-center border-none"
+                >
+                  <Send className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">搜尋</span>
+                </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <div className="text-[10px] font-bold uppercase tracking-[0.05em] text-[#64748b] mb-2">選擇條號直接瀏覽全部函釋</div>
+              <select
+                className="w-full bg-[#f8fafc] border border-[#e2e8f0] rounded-xl outline-none p-3 text-[14px] text-[#1e293b] focus:ring-2 focus:ring-[#3b82f6] focus:border-transparent transition-all"
+                value={selectedArticle}
+                onChange={(e) => handleArticleSelect(e.target.value)}
+              >
+                <option value="">請選擇條號…</option>
+                {articleList.map(a => (
+                  <option key={a.條號} value={a.條號}>
+                    {a.條號}（{a.count} 則函釋）
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+
           <div className="mt-3 flex items-center gap-2">
             {modelStatus === 'loading' ? (
               <>

@@ -25,6 +25,33 @@ for (const article of pdpcData) {
   }
 }
 
+// ── 依條號瀏覽（方向 A：篩選功能，不經 BM25／向量）──────────────────────────────
+export interface ArticleSummary { 條號: string; 條文內容: string; count: number }
+
+export const articleList: ArticleSummary[] = pdpcData.map(a => ({
+  條號: a.條號,
+  條文內容: a.條文內容,
+  count: a.函釋.length,
+}));
+
+export interface InterpDetail { 函釋字號: string; 條號: string; 發文日期: string; 全文: string; 來源URL: string }
+
+// 注意：同一則函釋可能同時掛在多條之下（原始資料重複列出），
+// 故直接讀取該條底下的 函釋 陣列，不透過以函釋字號去重的 interpMap，
+// 避免多條共用同一函釋字號時彼此覆蓋、篩選漏掉的問題。
+export function getInterpsByArticle(article: string): InterpDetail[] {
+  const target = pdpcData.find(a => a.條號 === article);
+  if (!target) return [];
+  const results: InterpDetail[] = target.函釋.map(i => ({
+    函釋字號: i.函釋字號,
+    條號: article,
+    發文日期: i.發文日期,
+    全文: i.全文,
+    來源URL: i.來源URL,
+  }));
+  return results.sort((a, b) => b.發文日期.localeCompare(a.發文日期));
+}
+
 // ── BM25 ──────────────────────────────────────────────────────────────────────
 
 const K1 = 1.5, B = 0.75;
