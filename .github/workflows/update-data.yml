@@ -53,14 +53,20 @@ jobs:
         run: npm run build:embeddings
 
       - name: Write data-updated timestamp
-        if: steps.check.outputs.changed == 'true'
+        # 不論這次有沒有抓到新函釋都寫，代表「系統最後一次確認過的時間」
         run: echo "{\"updatedAt\": \"$(date -u '+%Y-%m-%d')\"}" > public/data-updated.json
 
       - name: Commit and push
-        if: steps.check.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/data/pdpc_data.json public/embeddings.bin public/embeddings-meta.json public/data-updated.json
-          git commit -m "auto: update PDPC 函釋資料 $(date '+%Y-%m-%d')"
-          git push
+          git add public/data-updated.json
+          if [ "${{ steps.check.outputs.changed }}" = "true" ]; then
+            git add src/data/pdpc_data.json public/embeddings.bin public/embeddings-meta.json
+          fi
+          if git diff --cached --quiet; then
+            echo "沒有變動需要 commit。"
+          else
+            git commit -m "auto: update PDPC 函釋資料 $(date -u '+%Y-%m-%d')"
+            git push
+          fi
