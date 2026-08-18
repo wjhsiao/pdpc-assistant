@@ -49,12 +49,14 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('正在為您檢索法規與函釋...');
   const [initError, setInitError] = useState<string | null>(null);
+  const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // C6 fix: 預熱失敗時顯示錯誤，而非靜默 console.error
-    initSearch().then(() => { modelReady = true; }).catch(err => {
+    initSearch().then(() => { modelReady = true; setModelStatus('ready'); }).catch(err => {
       setInitError(`語意模型載入失敗，請重新整理頁面。(${err instanceof Error ? err.message : String(err)})`);
+      setModelStatus('error');
       console.error('initSearch failed:', err);
     });
   }, []);
@@ -183,9 +185,22 @@ export default function App() {
             </button>
           </form>
           <div className="mt-3 flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-[#10b981]"></div>
-            <span className="text-[12px] font-semibold text-[#64748b]">本機語意搜尋 · 離線可用</span>
-            <span className="text-[12px] text-[#94a3b8] ml-2 hidden sm:inline">新增函釋：更新 pdpc_data.json 後執行 npm run build:embeddings</span>
+            {modelStatus === 'loading' ? (
+              <>
+                <Loader2 className="w-3 h-3 animate-spin text-[#f59e0b]" />
+                <span className="text-[12px] font-semibold text-[#f59e0b]">語意模型載入中，首次約需 10–30 秒…</span>
+              </>
+            ) : modelStatus === 'error' ? (
+              <>
+                <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                <span className="text-[12px] font-semibold text-red-500">模型載入失敗，請重新整理頁面</span>
+              </>
+            ) : (
+              <>
+                <div className="w-2 h-2 rounded-full bg-[#10b981]"></div>
+                <span className="text-[12px] font-semibold text-[#64748b]">本機語意搜尋 · 離線可用</span>
+              </>
+            )}
           </div>
         </footer>
       </div>
