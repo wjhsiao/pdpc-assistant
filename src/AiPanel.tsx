@@ -2,20 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Loader2, ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { search, interpMap, getArticleText } from './lib/search';
+import { findInvalidCitations, formatCitationNumber } from './lib/citations';
 
 // 低於此分數視為「查無相關函釋」，不呼叫 LLM（省 token）。
 // 分數 = 0.5*語意相似度 + 0.5*BM25標準化分數，經驗閾值，可視實際查詢調整。
 const RELEVANCE_THRESHOLD = 0.15;
-
-// 從回答文字裡抓「XXX字第123號」格式的函釋字號候選。伺服器端（api/ask.ts）
-// 已經做過同樣的驗證＋重試，正常情況不會有查無對應資料的引用流到這裡；
-// 這裡是最後一道防線，一旦查到還是有，直接判定整輪失敗，不可照樣顯示。
-const CITATION_PATTERN = /[^\s，。、！？：「」『』（）()]*?字第[0-9]+號/g;
-
-function extractCitationTokens(text: string): string[] {
-  const matches = text.match(CITATION_PATTERN) ?? [];
-  return [...new Set(matches)];
-}
 
 interface Citation { 函釋字號: string; 條號: string; 來源URL: string }
 interface SourceDoc { 函釋字號: string; 條號: string; 全文: string; 來源URL: string }
@@ -29,8 +20,6 @@ interface Turn {
   sources?: SourceDoc[];
   errorMessage?: string;
 }
-
-let modelReady = false;
 
 interface Props {
   modelStatus: 'loading' | 'ready' | 'error';
@@ -59,7 +48,6 @@ export default function AiPanel({ modelStatus, initError }: Props) {
 
     try {
       const results = await search(question, 5);
-      modelReady = true;
 
       if (results.length === 0 || results[0].score < RELEVANCE_THRESHOLD) {
         setTurns(prev => prev.map(t => t.id === id ? { ...t, status: 'no-match' } : t));
@@ -73,7 +61,10 @@ export default function AiPanel({ modelStatus, initError }: Props) {
         .map(r => {
           const data = interpMap.get(r.函釋字號);
           if (!data) return null;
-          return { 函釋字號: r.函釋字號, 條號: data.條號, 全文: data.全文, 來源URL: data.來源URL };
+          // 條號用 r.條號（這次搜尋實際命中的那條），不要用 interpMap 查到的
+          // 條號——同一則函釋可能掛在多條之下，interpMap 用函釋字號去重時
+          // 後面的條號會覆蓋前面的，不代表這次語意比對命中的是哪一條。
+          return { 函釋字號: r.函釋字號, 條號: r.條號, 全文: data.全文, 來源URL: data.來源URL };
         })
         .filter((c): c is NonNullable<typeof c> => {
           if (c === null || seen.has(c.函釋字號)) return false;
@@ -105,11 +96,11 @@ export default function AiPanel({ modelStatus, initError }: Props) {
 
       // 最後一道防線：伺服器端已驗證過引用範圍，這裡再查一次，
       // 一旦仍有查無對應資料的引用，整輪判定失敗，絕不照樣顯示答案。
-      const sentIds = new Set(contexts.map(c => c.函釋字號));
-      const stillInvalid = extractCitationTokens(data.answer).filter(token => !sentIds.has(token));
+      const stillInvalid = findInvalidCitations(data.answer, contexts.map(c => c.函釋字號));
       if (stillInvalid.length > 0) {
+        const invalidLabel = stillInvalid.map(formatCitationNumber).join('、');
         setTurns(prev => prev.map(t => t.id === id
-          ? { ...t, status: 'error', errorMessage: `回答引用了查無對應資料的函釋字號（${stillInvalid.join('、')}），已中止顯示。` }
+          ? { ...t, status: 'error', errorMessage: `回答引用了查無對應資料的函釋字號（${invalidLabel}），已中止顯示。` }
           : t));
         return;
       }

@@ -1,6 +1,8 @@
 // Vercel Serverless Function：接收前端已檢索好的 top-5 函釋，交給 Gemini 生成自然語言回答。
 // GEMINI_API_KEY 從 Vercel 環境變數讀取，不進 git、不進 browser bundle。
 
+import { findInvalidCitations, formatCitationNumber } from '../src/lib/citations';
+
 const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
@@ -8,15 +10,6 @@ interface Context { 函釋字號: string; 條號: string; 全文: string; 來源
 interface ArticleText { 條號: string; 條文內容: string }
 
 interface AskRequestBody { question?: string; contexts?: Context[]; articles?: ArticleText[] }
-
-// 從回答文字裡抓「XXX字第123號」格式的字串，用來驗證 AI 有沒有引用超出範圍
-// （或根本不存在）的函釋。全庫函釋字號實測皆符合此格式。
-const CITATION_PATTERN = /[^\s，。、！？：「」『』（）()]*?字第[0-9]+號/g;
-
-function extractCitationTokens(text: string): string[] {
-  const matches = text.match(CITATION_PATTERN) ?? [];
-  return [...new Set(matches)];
-}
 
 function buildPrompt(question: string, contexts: Context[], articles: ArticleText[], correction?: string): string {
   const articleBlock = articles
@@ -45,7 +38,15 @@ ${contextBlock}
 3. 回答結尾另起一段，列出「引用函釋：」，逐一列出你實際引用的函釋字號（只列有實際用到的，且必須是上方【函釋】清單中出現過的字號，不可自行編造，不必全部列出）。`;
 }
 
-async function callGemini(apiKey: string, prompt: string): Promise<string> {
+function isTransientError(status: number, body: string): boolean {
+  return status === 503 || /high demand|UNAVAILABLE/i.test(body);
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Gemini 暫時性過載（503／high demand／UNAVAILABLE）時重試，避免單次過載就整個失敗。
+// 這跟下面 handler() 裡「引用驗證不過重新生成」是不同層次的重試，各自獨立。
+async function callGemini(apiKey: string, prompt: string, retriesLeft = 2): Promise<string> {
   const geminiRes = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -59,6 +60,10 @@ async function callGemini(apiKey: string, prompt: string): Promise<string> {
 
   if (!geminiRes.ok) {
     const errBody = await geminiRes.text();
+    if (retriesLeft > 0 && isTransientError(geminiRes.status, errBody)) {
+      await sleep((3 - retriesLeft) * 700);
+      return callGemini(apiKey, prompt, retriesLeft - 1);
+    }
     throw new Error(`Gemini API 錯誤 (${geminiRes.status})：${errBody.slice(0, 300)}`);
   }
 
@@ -96,23 +101,24 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const validIds = new Set(contexts.map(c => c.函釋字號));
+  const validIds = contexts.map(c => c.函釋字號);
 
   try {
     // 第一次生成
     let answer = await callGemini(apiKey, buildPrompt(question, contexts, articles));
-    let invalid = extractCitationTokens(answer).filter(t => !validIds.has(t));
+    let invalid = findInvalidCitations(answer, validIds);
 
     // 引用了查無對應資料的字號：不可把這種內容端給使用者，重試一次要求修正
     if (invalid.length > 0) {
-      answer = await callGemini(apiKey, buildPrompt(question, contexts, articles, invalid.join('、')));
-      invalid = extractCitationTokens(answer).filter(t => !validIds.has(t));
+      const correction = invalid.map(formatCitationNumber).join('、');
+      answer = await callGemini(apiKey, buildPrompt(question, contexts, articles, correction));
+      invalid = findInvalidCitations(answer, validIds);
     }
 
     // 重試後仍然引用查無對應資料的字號：直接回錯誤，絕不顯示這個回答
     if (invalid.length > 0) {
       res.status(502).json({
-        error: `AI 生成的回答引用了查無對應資料的函釋字號（${invalid.join('、')}），已中止顯示以避免誤導，請重新嘗試或換個問法。`,
+        error: `AI 生成的回答引用了查無對應資料的函釋字號（${invalid.map(formatCitationNumber).join('、')}），已中止顯示以避免誤導，請重新嘗試或換個問法。`,
       });
       return;
     }

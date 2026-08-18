@@ -26,7 +26,9 @@ function formatResults(results: Array<{ 函釋字號: string; 條號: string; sc
 
     const yaoZhi = extractYaoZhi(data.全文);
     lines.push('---');
-    lines.push(`### ${i + 1}. ${data.條號}｜${r.函釋字號} · ${(r.score * 100).toFixed(1)}%`);
+    // 條號用 r.條號（這次搜尋實際命中的那條），不用 data.條號——同一則函釋
+    // 可能掛在多條之下，interpMap 用函釋字號去重時後面的條號會覆蓋前面的。
+    lines.push(`### ${i + 1}. ${r.條號}｜${r.函釋字號} · ${(r.score * 100).toFixed(1)}%`);
     lines.push(`📅 發文日期：${data.發文日期}\n`);
     lines.push(`**要旨**\n\n${yaoZhi}\n`);
     lines.push(`[查看原文 →](${data.來源URL})\n`);
@@ -52,8 +54,6 @@ function formatArticleResults(article: string, interps: InterpDetail[]): string 
 
   return lines.join('\n');
 }
-
-let modelReady = false;
 
 interface Props {
   modelStatus: 'loading' | 'ready' | 'error';
@@ -88,11 +88,12 @@ export default function SearchPanel({ modelStatus, initError }: Props) {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
-    setLoadingMessage(modelReady ? '正在為您檢索法規與函釋...' : '正在初始化語意搜尋引擎（首次約需 10–30 秒）...');
+    // modelStatus 是 App.tsx 統一管的初始化狀態（一次初始化，兩個分頁共用），
+    // 用它判斷要不要顯示「初始化中」文案，不要各分頁自己土法煉鋼追蹤一份。
+    setLoadingMessage(modelStatus === 'ready' ? '正在為您檢索法規與函釋...' : '正在初始化語意搜尋引擎（首次約需 10–30 秒）...');
 
     try {
       const results = await search(query, 5);
-      modelReady = true;
       const content = formatResults(results);
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content }]);
     } catch (error: unknown) {

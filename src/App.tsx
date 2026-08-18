@@ -30,6 +30,15 @@ export default function App() {
       .catch(() => {}); // 純資訊性質，抓不到就不顯示，不影響主功能
   }, []);
 
+  useEffect(() => {
+    // switchTo 用 pushState 把切換分頁記進瀏覽紀錄，這裡補上對應的
+    // popstate 監聽，讓瀏覽器上一頁/下一頁能正確把畫面切回對應分頁，
+    // 不然網址變了但畫面沒跟著變。
+    const onPopState = () => setPage(initialPage());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
   const switchTo = (next: Page) => {
     setPage(next);
     const path = next === 'ai' ? '/ai' : '/';
