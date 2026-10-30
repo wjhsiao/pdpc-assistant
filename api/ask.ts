@@ -2,6 +2,7 @@
 // GEMINI_API_KEY 從 Vercel 環境變數讀取，不進 git、不進 browser bundle。
 
 import { findInvalidCitations, formatCitationNumber } from './_lib/citations.js';
+import { validateAskBody } from './_lib/validate.js';
 
 const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
@@ -88,18 +89,16 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const body: AskRequestBody = req.body ?? {};
-  const { question, contexts, articles: articlesInput } = body;
-  const articles = Array.isArray(articlesInput) ? articlesInput : [];
+  const validation = validateAskBody(req.body);
+  if (validation.ok === false) {
+    res.status(400).json({ error: validation.error });
+    return;
+  }
 
-  if (!question || typeof question !== 'string') {
-    res.status(400).json({ error: 'question 為必填字串' });
-    return;
-  }
-  if (!Array.isArray(contexts) || contexts.length === 0) {
-    res.status(400).json({ error: 'contexts 為必填陣列' });
-    return;
-  }
+  // validateAskBody 已保證 question／contexts 存在且型別正確
+  const { question, contexts, articles: articlesInput } =
+    req.body as AskRequestBody & Required<Pick<AskRequestBody, 'question' | 'contexts'>>;
+  const articles = Array.isArray(articlesInput) ? articlesInput : [];
 
   const validIds = contexts.map(c => c.函釋字號);
 
