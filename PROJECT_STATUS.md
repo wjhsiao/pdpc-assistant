@@ -15,4 +15,4 @@ React 19 + Vite PWA。`/` 為瀏覽器端函釋查詢；`/ai` 為問答，經 `P
 3. 引用是否實質支持論述，仍靠人工抽樣核對。
 4. 遷移到 `@huggingface/transformers`，以根治依賴漏洞（另案）。
 5. 既有函釋內容變更不會自動同步，需人工處理或另行設計。
-6. 視需要為 `vercel.json` 加上基本安全標頭（`X-Content-Type-Options`、`Referrer-Policy` 等），需先確認不影響 PWA 與 HuggingFace 模型載入。
+6. 評估加上 `Content-Security-Policy`：需先逐一確認不影響 PWA、service worker 與 HuggingFace 模型／WASM 載入，誤設會讓語意搜尋失效，因此目前只加了不影響功能的基本標頭（`vercel.json`）。
