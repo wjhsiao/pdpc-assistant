@@ -162,7 +162,9 @@ export async function initSearch(): Promise<void> {
   getBM25Index(); // 預熱 BM25，避免第一次搜尋時才建立
 }
 
-export interface SearchResult { 函釋字號: string; 條號: string; score: number }
+// score＝混合排序用分數（BM25 以當次最大值正規化，跨問題不可比較）；
+// semantic＝與該筆向量的原始語意相似度（cosine，跨問題可比較，供「是否相關」的判斷）。
+export interface SearchResult { 函釋字號: string; 條號: string; score: number; semantic: number }
 
 export async function search(query: string, topK = 5): Promise<SearchResult[]> {
   await initSearch();
@@ -198,7 +200,7 @@ export async function search(query: string, topK = 5): Promise<SearchResult[]> {
     let semantic = 0;
     for (let j = 0; j < dim; j++) semantic += bin[offset + j] * queryVec[j];
     const keyword = bm25Scores.get(m.函釋字號) ?? 0;
-    return { 函釋字號: m.函釋字號, 條號: m.條號, score: 0.5 * semantic + 0.5 * keyword };
+    return { 函釋字號: m.函釋字號, 條號: m.條號, score: 0.5 * semantic + 0.5 * keyword, semantic };
   });
 
   return scored.sort((a, b) => b.score - a.score).slice(0, topK);

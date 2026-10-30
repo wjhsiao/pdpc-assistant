@@ -4,9 +4,14 @@ import ReactMarkdown from 'react-markdown';
 import { search, interpMap, getArticleText } from './lib/search';
 import { findCitedIds, findInvalidCitations, formatCitationNumber } from '../api/_lib/citations';
 
-// 低於此分數視為「查無相關函釋」，不呼叫 LLM（省 token）。
-// 分數 = 0.5*語意相似度 + 0.5*BM25標準化分數，經驗閾值，可視實際查詢調整。
-const RELEVANCE_THRESHOLD = 0.15;
+// 候選中最高的原始語意相似度（cosine）低於此值，視為「查無相關函釋」，不呼叫 LLM（省 token）。
+// 不能用混合分數 score：它的 BM25 以當次最大值正規化，只要有任何字詞重疊最高分就固定得 1.0，
+// 離題問題也有約 60%，無法與相關問題區分。
+// 閾值依 24 個問題實測（2026-10，bge-base-zh 量化模型）：個資相關 0.390–0.593、
+// 一般離題 0.225–0.350，取中間 0.37。樣本小，累積實際使用後應重新檢視。
+// 限制：邏輯上相鄰的法域問題（加班費、房租等，實測 0.395–0.440）分不開，仍會送給 LLM，
+// 由提示詞要求它說明資料不足。
+const MIN_SEMANTIC_SIMILARITY = 0.37;
 
 interface Citation { 函釋字號: string; 條號: string; 來源URL: string }
 interface SourceDoc { 函釋字號: string; 條號: string; 全文: string; 來源URL: string }
@@ -49,7 +54,7 @@ export default function AiPanel({ modelStatus, initError }: Props) {
     try {
       const results = await search(question, 5);
 
-      if (results.length === 0 || results[0].score < RELEVANCE_THRESHOLD) {
+      if (results.length === 0 || Math.max(...results.map(r => r.semantic)) < MIN_SEMANTIC_SIMILARITY) {
         setTurns(prev => prev.map(t => t.id === id ? { ...t, status: 'no-match' } : t));
         return;
       }
