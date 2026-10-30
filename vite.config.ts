@@ -31,7 +31,7 @@ export default defineConfig(() => {
               },
             },
           ],
-          // embeddings.json 可能超過 Workbox 預設的 2MB 快取上限
+          // 主程式 bundle 約 2.4MB，超過 Workbox 預設的 2MB 預快取上限
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         },
         manifest: {
