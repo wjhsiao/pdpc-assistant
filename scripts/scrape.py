@@ -11,12 +11,18 @@ PDPC 函釋爬蟲 - 增量更新版
 import requests
 import re
 import json
+import os
 import sys
 import time
 from pathlib import Path
 BASE_URL = "https://www.pdpc.gov.tw"
 LISTING_URL = f"{BASE_URL}/News_Html/100/"
-DATA_PATH = Path(__file__).parent.parent / "src" / "data" / "pdpc_data.json"
+# 可用環境變數 PDPC_DATA_PATH 覆寫資料檔路徑（試跑用）；未設定時維持原路徑
+DATA_PATH = (
+    Path(os.environ["PDPC_DATA_PATH"])
+    if os.environ.get("PDPC_DATA_PATH")
+    else Path(__file__).parent.parent / "src" / "data" / "pdpc_data.json"
+)
 
 HEADERS = {
     "User-Agent": (
@@ -50,6 +56,15 @@ def build_existing_ids(data):
         for interp in article.get("函釋", []):
             ids.add(interp["函釋字號"])
     return ids
+
+
+def build_existing_pairs(data):
+    """(條號, 函釋字號) 配對集合；同一函釋可掛在多個條號底下"""
+    pairs = set()
+    for article in data:
+        for interp in article.get("函釋", []):
+            pairs.add((article["條號"], interp["函釋字號"]))
+    return pairs
 
 
 # ── 第一層：法條列表 ───────────────────────────────────────────────────────────
@@ -147,14 +162,16 @@ def main():
     session = get_session()
 
     existing = load_existing()
-    existing_ids = build_existing_ids(existing)
-    print(f"現有函釋：{len(existing_ids)} 筆")
+    existing_pairs = build_existing_pairs(existing)
+    print(f"現有函釋：{len(build_existing_ids(existing))} 筆（{len(existing_pairs)} 列）")
 
     # 條號 → 在 existing 的索引
     article_index = {a["條號"]: i for i, a in enumerate(existing)}
 
     articles = fetch_article_list(session)
     new_count = 0
+    failures = []  # (URL 或條號, 錯誤訊息)
+    fetched = {}   # 本次執行已抓過的 URL → content，同一函釋跨條號時重用
 
     for art in articles:
         article_no = art.get("條號", "").strip()
@@ -164,7 +181,15 @@ def main():
 
         print(f"\n[2] {article_no} → {list_url}")
 
-        # 若為新條號，建立欄位
+        try:
+            interp_urls = fetch_interp_urls(session, list_url)
+        except Exception as e:
+            failures.append((article_no, f"列表頁 {list_url}：{e}"))
+            print(f"    ❌ 列表頁錯誤（{article_no}）：{e}")
+            continue
+        print(f"    找到 {len(interp_urls)} 個函釋連結")
+
+        # 若為新條號，建立欄位（列表頁抓取成功後才建立，避免留下空條號）
         if article_no not in article_index:
             existing.append({
                 "條號": article_no,
@@ -176,38 +201,50 @@ def main():
 
         idx = article_index[article_no]
 
-        interp_urls = fetch_interp_urls(session, list_url)
-        print(f"    找到 {len(interp_urls)} 個函釋連結")
-
         for url in interp_urls:
             try:
-                content = fetch_interp(session, url)
+                from_cache = url in fetched
+                if from_cache:
+                    content = fetched[url]
+                else:
+                    content = fetch_interp(session, url)
+                    fetched[url] = content
                 if not content or not content["函釋字號"]:
                     continue
 
-                if content["函釋字號"] in existing_ids:
-                    continue  # 已存在，跳過
+                pair = (article_no, content["函釋字號"])
+                if pair in existing_pairs:
+                    continue  # 此條號下已有該函釋，跳過（不更新既有內容）
 
-                existing[idx]["函釋"].append(content)
-                existing_ids.add(content["函釋字號"])
+                existing[idx]["函釋"].append(dict(content))
+                existing_pairs.add(pair)
                 new_count += 1
-                print(f"    ✅ 新增：{content['函釋字號']}")
-                time.sleep(1)
+                print(f"    ✅ 新增：{article_no} / {content['函釋字號']}")
+                if not from_cache:
+                    time.sleep(1)
 
             except Exception as e:
+                failures.append((url, str(e)))
                 print(f"    ❌ 錯誤（{url}）：{e}")
 
-    print(f"\n共新增 {new_count} 筆函釋")
+    print(f"\n共新增 {new_count} 列函釋")
 
     if new_count == 0:
-        print("無新增，結束。")
-        sys.exit(0)
+        print("無新增。")
+    else:
+        # 有新增即寫回（即使有失敗，也保留已成功抓到的內容）
+        DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(DATA_PATH, "w", encoding="utf-8") as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
+        print(f"已更新 {DATA_PATH}")
 
-    # 寫回
-    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(existing, f, ensure_ascii=False, indent=2)
-    print(f"已更新 {DATA_PATH}")
+    if failures:
+        print(f"\n失敗摘要：共 {len(failures)} 筆失敗")
+        for target, msg in failures:
+            print(f"  - {target}：{msg}")
+        sys.exit(1)
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":
