@@ -67,9 +67,15 @@ npm run build:embeddings
 - 只比對回答中「字第N號」的數字是否在本次候選名單內；不驗機關前綴，也不驗論述是否被函釋支持。法律結論必須人工核對。
 - 畫面上「引用函釋」只列可確認被引用者；「檢索候選原文」未必全部被引用。
 
+**「查無資料」判斷有限**
+- `/ai` 以候選中最高的原始語意相似度與 0.37 比較，低於就不呼叫 Gemini。門檻依 24 個問題實測：個資相關 0.390–0.593、一般離題 0.225–0.350。樣本小，累積實際使用後應重新檢視。
+- 邏輯相鄰的法域問題（加班費、房租等，實測 0.395–0.440）分不開，仍會送給 Gemini，由提示詞要求它說明資料不足。
+- 不能改用畫面上的「關聯度 %」：它的 BM25 以當次最大值正規化，只要有字詞重疊最高分就固定得 1.0，不同問題之間不可比較。
+
 **依賴漏洞（已接受的風險）**
 - `npm audit` 尚餘 9 項：1 critical、4 high 來自 `@xenova/transformers`（經 onnxruntime-web、onnx-proto、protobufjs、sharp）；4 low 來自 `vite-plugin-pwa` 鏈。修補皆需破壞性變更。
-- 接受理由：`@xenova/transformers` 已是最後一版；這些套件只在瀏覽器端載入指定的 HuggingFace 模型檔，不處理使用者上傳的 protobuf 或圖片，實際可被利用的路徑小。
+- 接受理由：`@xenova/transformers` 已是最後一版。protobufjs 公告的利用前提是攻擊者能控制被載入的 schema／descriptor，本專案只用 `onnx-proto` 預先產生的靜態 schema 解碼模型檔，不符前提；`sharp` 在瀏覽器版被排除（正式 bundle 內無 libvips）；`vite-plugin-pwa` 鏈只在建置時使用。
+- 真正的執行期信任點是 `huggingface.co`（模型檔）與 `cdn.jsdelivr.net`（ONNX WASM），沒有完整性檢查，且 service worker 會快取 90 天；任一來源被入侵，惡意程式可讀取使用者輸入的問題。可考慮的緩解：CSP 的 `connect-src` 白名單，或自行託管模型與 WASM。
 - **不可執行 `npm audit fix --force`**：它會把 `@xenova/transformers` 降到 1.4.2，破壞語意搜尋。根治方向是遷移到 `@huggingface/transformers`，屬另案。
 
 **其他**
