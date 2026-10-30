@@ -35,6 +35,21 @@ export function findInvalidCitations(answerText: string, validIds: string[]): st
   return extractCitationNumbers(answerText).filter(n => !validNumbers.has(n));
 }
 
+/** 回傳 ids 中「字第N號」的數字有出現在回答文字內的函釋字號（依 ids 順序、去重）。 */
+export function findCitedIds(answerText: string, ids: string[]): string[] {
+  const answerNumbers = new Set(extractCitationNumbers(answerText));
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const id of ids) {
+    const n = citationNumber(id);
+    if (n !== null && answerNumbers.has(n) && !seen.has(id)) {
+      seen.add(id);
+      result.push(id);
+    }
+  }
+  return result;
+}
+
 /** 把抓到的數字格式化回「字第N號」，方便顯示在錯誤訊息裡。 */
 export function formatCitationNumber(n: string): string {
   return `字第${n}號`;

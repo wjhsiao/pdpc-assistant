@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Loader2, ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { search, interpMap, getArticleText } from './lib/search';
-import { findInvalidCitations, formatCitationNumber } from '../api/_lib/citations';
+import { findCitedIds, findInvalidCitations, formatCitationNumber } from '../api/_lib/citations';
 
 // 低於此分數視為「查無相關函釋」，不呼叫 LLM（省 token）。
 // 分數 = 0.5*語意相似度 + 0.5*BM25標準化分數，經驗閾值，可視實際查詢調整。
@@ -105,9 +105,10 @@ export default function AiPanel({ modelStatus, initError }: Props) {
         return;
       }
 
-      // 只顯示模型回答內文中實際提到的函釋字號；一個都比對不到時退回顯示全部 contexts
-      const cited = contexts.filter(c => data.answer.includes(c.函釋字號));
-      const citations: Citation[] = (cited.length > 0 ? cited : contexts)
+      // 只顯示模型回答內文中實際提到的函釋字號（以「字第N號」數字比對）；零命中就是空陣列，不退回顯示全部 contexts
+      const citedIds = new Set(findCitedIds(data.answer, contexts.map(c => c.函釋字號)));
+      const citations: Citation[] = contexts
+        .filter(c => citedIds.has(c.函釋字號))
         .map(c => ({ 函釋字號: c.函釋字號, 條號: c.條號, 來源URL: c.來源URL }));
 
       const sources: SourceDoc[] = contexts;
@@ -184,12 +185,15 @@ export default function AiPanel({ modelStatus, initError }: Props) {
                     ))}
                   </div>
                 )}
+                {turn.citations && turn.citations.length === 0 && (
+                  <div className="mt-3 text-[12px] text-[#94a3b8]">AI 未明確標示引用的函釋字號</div>
+                )}
 
                 {turn.sources && turn.sources.length > 0 && (
                   <details className="mt-3 pt-3 border-t border-[#e2e8f0]">
                     <summary className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.05em] text-[#94a3b8] cursor-pointer select-none [&::-webkit-details-marker]:hidden">
                       <ChevronDown className="w-3.5 h-3.5" />
-                      本次參考原文（{turn.sources.length} 則）
+                      檢索候選原文（{turn.sources.length} 則，未必全部被引用）
                     </summary>
                     <div className="mt-2 flex flex-col gap-3">
                       {turn.sources.map(s => (
