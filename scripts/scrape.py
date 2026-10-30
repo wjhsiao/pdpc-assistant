@@ -101,6 +101,14 @@ def fetch_interp_urls(session, list_url):
 
 # ── 第三層：個別函釋頁面 ────────────────────────────────────────────────────────
 
+def parse_doc_date(full_text):
+    """從全文解析公文發文日（民國年），回傳 ISO YYYY-MM-DD；解析不到回 None"""
+    m = re.search(r"發文日期\s*(\d{2,3})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", full_text or "")
+    if not m:
+        return None
+    return f"{int(m.group(1)) + 1911}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+
+
 def fetch_interp(session, url):
     """抓 /News_Content/102/xxx，從 JSON-LD 取函釋字號、日期、全文"""
     resp = session.get(url, timeout=30)
@@ -126,7 +134,8 @@ def fetch_interp(session, url):
     return {
         "函釋字號": headline,
         "標題": headline,
-        "發文日期": date_fmt,
+        "發文日期": parse_doc_date(full_text) or date_fmt,  # 公文發文日；解析失敗 fallback 公布日期
+        "公布日期": date_fmt,  # 網站發布日（JSON-LD datePublished）
         "全文": full_text,
         "來源URL": url,
     }
