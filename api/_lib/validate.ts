@@ -24,6 +24,47 @@ function checkStringField(obj: Record<string, unknown>, key: string, max: number
   return null;
 }
 
+function firstHeader(v: string | string[] | undefined): string | undefined {
+  return Array.isArray(v) ? v[0] : v;
+}
+
+// 從 Origin／Referer 的 URL 取出 host（含 port，小寫）；無法解析回 null
+function hostOf(value: string): string | null {
+  try {
+    return new URL(value).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+// 同源檢查：請求的 Origin（無則看 Referer）host 必須等於本站 host（x-forwarded-host 或 host）。
+// 注意：這不是完整防護。瀏覽器 POST 一定帶 Origin，能擋一般腳本／curl 直接亂打；
+// 但非瀏覽器客戶端可任意偽造這些標頭，無法防有心人。標頭名稱以小寫為準（Node req.headers）。
+export function checkSameOrigin(headers: Record<string, string | string[] | undefined>): ValidateResult {
+  const denied: ValidateResult = { ok: false, error: '不允許的請求來源' };
+
+  const allowed = new Set<string>();
+  const addHosts = (raw: string | undefined) => {
+    if (!raw) return;
+    for (const part of raw.split(',')) {
+      const h = part.trim().toLowerCase();
+      if (h) allowed.add(h);
+    }
+  };
+  addHosts(firstHeader(headers['x-forwarded-host']));
+  addHosts(firstHeader(headers['host']));
+
+  const origin = firstHeader(headers['origin']);
+  const referer = firstHeader(headers['referer']);
+  const source = origin ? origin : referer;
+  if (!source) return denied;
+  if (source.trim().toLowerCase() === 'null') return denied;
+
+  const host = hostOf(source.trim());
+  if (host === null || !allowed.has(host)) return denied;
+  return { ok: true };
+}
+
 export function validateAskBody(body: unknown): ValidateResult {
   if (!isRecord(body)) return { ok: false, error: '請求內容必須是 JSON 物件' };
 

@@ -2,7 +2,7 @@
 // GEMINI_API_KEY 從 Vercel 環境變數讀取，不進 git、不進 browser bundle。
 
 import { findInvalidCitations, formatCitationNumber } from './_lib/citations.js';
-import { validateAskBody } from './_lib/validate.js';
+import { checkSameOrigin, validateAskBody } from './_lib/validate.js';
 
 const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
@@ -80,6 +80,13 @@ async function callGemini(apiKey: string, prompt: string, retriesLeft = 2): Prom
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  // 同源檢查：只接受本站瀏覽器發出的請求（擋直接用腳本／curl 亂打；非完整防護，標頭可被偽造）
+  const originCheck = checkSameOrigin(req.headers ?? {});
+  if (originCheck.ok === false) {
+    res.status(403).json({ error: originCheck.error });
     return;
   }
 
