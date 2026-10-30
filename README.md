@@ -21,7 +21,7 @@ npm run dev
 
 ### 完整模式（含 AI 問答）
 
-需要 [Vercel CLI](https://vercel.com/docs/cli)。此本機流程尚未實測，指令與選項以 `vercel dev --help` 為準。
+需要 [Vercel CLI](https://vercel.com/docs/cli)。已在 Windows＋CLI 54.18.2 以 `--local` 實測：頁面、`/api/ask` 的同源檢查、未設金鑰與金鑰無效的錯誤分支皆如預期；真實 Gemini 回答只在正式站驗證過。
 
 1. `npm ci`
 2. 建立 `.env.local`（已存在則保留）：
@@ -33,7 +33,9 @@ npm run dev
    ```
 
 3. 編輯 `.env.local` 填入 `GEMINI_API_KEY`。該檔已被 `.gitignore` 排除，請勿提交真實金鑰。
-4. 啟動：`vercel dev --local --listen 127.0.0.1:3000`，再開啟 `http://127.0.0.1:3000/`。
+4. 啟動：`vercel dev --local --listen 127.0.0.1:3000`，再開啟 `http://127.0.0.1:3000/`。若 3000 埠已被占用，CLI 會改用下一個埠，請依終端機顯示的網址開啟。
+
+`vercel.json` 的 `devCommand` 是必要的：本機模式下 CLI 預設用 `yarn` 啟動前端，沒安裝 yarn 時 `/`、`/ai` 會回 500（API 仍正常）。它只影響 `vercel dev`，不影響正式部署。
 
 環境變數僅 `GEMINI_API_KEY`，只由後端讀取，不可加 `VITE_` 前綴或放進前端程式。`DISABLE_HMR` 由程序環境直接讀取，不讀 `.env`；需要時在同一個 PowerShell 工作階段先執行 `$env:DISABLE_HMR='true'`。`npm run preview` 只預覽前端產物，不提供 AI API。
 
