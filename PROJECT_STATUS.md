@@ -15,5 +15,5 @@ React 19 + Vite PWA。`/` 為瀏覽器端函釋查詢；`/ai` 為問答，經 `P
 3. 引用是否實質支持論述，仍靠人工抽樣核對。
 4. 遷移到 `@huggingface/transformers`，以根治依賴漏洞（另案）。
 5. 既有函釋內容變更不會自動同步，需人工處理或另行設計。
-6. 把 24 個門檻量測問題與腳本存進 `scripts/`（目前只存在於當次作業，無法重現），並在累積實際使用後重新檢視 `/ai` 的語意相似度門檻（`MIN_SEMANTIC_SIMILARITY`，見 README「查無資料判斷有限」）；並考慮把關鍵字搜尋頁面的「關聯度 %」改成可比較的指標，或移除，因為目前跨問題不可比較。
+6. 把 24 個門檻量測問題與腳本存進 `scripts/`（目前只存在於當次作業，無法重現），並在累積實際使用後重新檢視 `/ai` 的語意相似度門檻（`MIN_SEMANTIC_SIMILARITY`，見 README「查無資料判斷有限」）。
 7. 評估加上 `Content-Security-Policy`：需先逐一確認不影響 PWA、service worker 與 HuggingFace 模型／WASM 載入，誤設會讓語意搜尋失效，因此目前只加了不影響功能的基本標頭（`vercel.json`）。

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, User, Bot, Loader2, List } from 'lucide-react';
+import { Send, User, Bot, Loader2, List, Clock } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { search, interpMap, articleList, getInterpsByArticle, type InterpDetail } from './lib/search';
+import { search, interpMap, articleList, getInterpsByArticle, getLatestInterps, parseRecencyIntent, type InterpDetail, type LatestInterp } from './lib/search';
 
 interface Message {
   id: string;
@@ -14,10 +14,10 @@ function extractYaoZhi(fullText: string): string {
   return match ? match[1].trim() : fullText.substring(0, 300);
 }
 
-function formatResults(results: Array<{ 函釋字號: string; 條號: string; score: number }>): string {
+function formatResults(results: Array<{ 函釋字號: string; 條號: string }>): string {
   if (results.length === 0) return '未找到相關函釋，請嘗試調整查詢用詞。';
 
-  const lines: string[] = [`找到 **${results.length}** 條相關函釋，依關聯度排序：\n`];
+  const lines: string[] = [`找到 **${results.length}** 條相關函釋，依相關程度排序：\n`];
 
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
@@ -28,7 +28,7 @@ function formatResults(results: Array<{ 函釋字號: string; 條號: string; sc
     lines.push('---');
     // 條號用 r.條號（這次搜尋實際命中的那條），不用 data.條號——同一則函釋
     // 可能掛在多條之下，interpMap 用函釋字號去重時後面的條號會覆蓋前面的。
-    lines.push(`### ${i + 1}. ${r.條號}｜${r.函釋字號} · ${(r.score * 100).toFixed(1)}%`);
+    lines.push(`### ${i + 1}. ${r.條號}｜${r.函釋字號}`);
     lines.push(`📅 發文日期：${data.發文日期}\n`);
     lines.push(`**要旨**\n\n${yaoZhi}\n`);
     lines.push(`[查看原文 →](${data.來源URL})\n`);
@@ -55,6 +55,24 @@ function formatArticleResults(article: string, interps: InterpDetail[]): string 
   return lines.join('\n');
 }
 
+function formatLatestResults(interps: LatestInterp[]): string {
+  if (interps.length === 0) return '目前沒有函釋資料。';
+
+  const lines: string[] = [`最新 **${interps.length}** 則函釋，依發文日期新到舊排序：\n`];
+
+  for (let i = 0; i < interps.length; i++) {
+    const data = interps[i];
+    const yaoZhi = extractYaoZhi(data.全文);
+    lines.push('---');
+    lines.push(`### ${i + 1}. ${data.條號.join('、')}｜${data.函釋字號}`);
+    lines.push(`📅 發文日期：${data.發文日期}\n`);
+    lines.push(`**要旨**\n\n${yaoZhi}\n`);
+    lines.push(`[查看原文 →](${data.來源URL})\n`);
+  }
+
+  return lines.join('\n');
+}
+
 interface Props {
   modelStatus: 'loading' | 'ready' | 'error';
   initError: string | null;
@@ -71,7 +89,7 @@ export default function SearchPanel({ modelStatus, initError }: Props) {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('正在為您檢索法規與函釋...');
-  const [mode, setMode] = useState<'keyword' | 'article'>('keyword');
+  const [mode, setMode] = useState<'keyword' | 'article' | 'latest'>('keyword');
   const [selectedArticle, setSelectedArticle] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -87,6 +105,15 @@ export default function SearchPanel({ modelStatus, initError }: Props) {
     const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: query };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
+
+    // 問題主體是「列出最新函釋」：直接依發文日期列出，不跑語意檢索
+    const recencyCount = parseRecencyIntent(query);
+    if (recencyCount !== null) {
+      const content = formatLatestResults(getLatestInterps(recencyCount));
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content }]);
+      return;
+    }
+
     setIsLoading(true);
     // modelStatus 是 App.tsx 統一管的初始化狀態（一次初始化，兩個分頁共用），
     // 用它判斷要不要顯示「初始化中」文案，不要各分頁自己土法煉鋼追蹤一份。
@@ -114,6 +141,12 @@ export default function SearchPanel({ modelStatus, initError }: Props) {
     const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: `瀏覽 ${article} 所有函釋` };
     const interps = getInterpsByArticle(article);
     const content = formatArticleResults(article, interps);
+    setMessages(prev => [...prev, userMessage, { id: crypto.randomUUID(), role: 'assistant', content }]);
+  };
+
+  const handleLatestSelect = (n: number) => {
+    const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: `最新 ${n} 則函釋` };
+    const content = formatLatestResults(getLatestInterps(n));
     setMessages(prev => [...prev, userMessage, { id: crypto.randomUUID(), role: 'assistant', content }]);
   };
 
@@ -190,6 +223,16 @@ export default function SearchPanel({ modelStatus, initError }: Props) {
             <List className="w-3.5 h-3.5" />
             依條號瀏覽
           </button>
+          <button
+            type="button"
+            onClick={() => setMode('latest')}
+            className={`px-3 py-1.5 rounded-md text-[12px] font-semibold transition-colors border-none flex items-center gap-1 ${
+              mode === 'latest' ? 'bg-white text-[#1e293b] shadow-sm' : 'bg-transparent text-[#64748b]'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            最新函釋
+          </button>
         </div>
 
         {mode === 'keyword' ? (
@@ -218,6 +261,22 @@ export default function SearchPanel({ modelStatus, initError }: Props) {
                 <span className="hidden sm:inline">搜尋</span>
               </button>
             </form>
+          </>
+        ) : mode === 'latest' ? (
+          <>
+            <div className="text-[10px] font-bold uppercase tracking-[0.05em] text-[#64748b] mb-2">依發文日期列出最新函釋</div>
+            <div className="flex items-center gap-2">
+              {[3, 5, 10].map(n => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => handleLatestSelect(n)}
+                  className="flex-1 sm:flex-none bg-[#f8fafc] hover:bg-[#e2e8f0] border border-[#e2e8f0] rounded-xl px-5 py-2.5 text-[14px] font-semibold text-[#1e293b] transition-colors h-[44px]"
+                >
+                  最新 {n} 則
+                </button>
+              ))}
+            </div>
           </>
         ) : (
           <>

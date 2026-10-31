@@ -59,6 +59,94 @@ export function getInterpsByArticle(article: string): InterpDetail[] {
   return results.sort((a, b) => b.發文日期.localeCompare(a.發文日期));
 }
 
+// ── 最新函釋（依發文日期，不經 BM25／向量）────────────────────────────────────
+
+export interface LatestInterp { 函釋字號: string; 條號: string[]; 發文日期: string; 全文: string; 來源URL: string }
+
+// 發文日期 → 可比較的數字（yyyymmdd）；支援 2026-08-19、115/08/19、115年8月19日。無法解析回 null。
+function dateKey(raw: string): number | null {
+  const iso = raw.match(/^\s*(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (iso) return Number(iso[1]) * 10000 + Number(iso[2]) * 100 + Number(iso[3]);
+  const roc = raw.match(/^\s*(?:民國)?(\d{2,3})(?:年|[-/.])(\d{1,2})(?:月|[-/.])(\d{1,2})/);
+  if (roc) return (Number(roc[1]) + 1911) * 10000 + Number(roc[2]) * 100 + Number(roc[3]);
+  return null;
+}
+
+let latestCache: LatestInterp[] | null = null;
+
+function buildLatestList(): LatestInterp[] {
+  const byId = new Map<string, LatestInterp>();
+  for (const article of pdpcData) {
+    for (const i of article.函釋) {
+      const existing = byId.get(i.函釋字號);
+      if (existing) {
+        if (!existing.條號.includes(article.條號)) existing.條號.push(article.條號);
+      } else {
+        byId.set(i.函釋字號, {
+          函釋字號: i.函釋字號,
+          條號: [article.條號],
+          發文日期: i.發文日期,
+          全文: i.全文,
+          來源URL: i.來源URL,
+        });
+      }
+    }
+  }
+  // 日期無法解析者排最後；同日以函釋字號由大到小，讓結果穩定
+  return [...byId.values()]
+    .map(x => ({ x, k: dateKey(x.發文日期) }))
+    .sort((a, b) => {
+      if (a.k === null && b.k === null) return b.x.函釋字號.localeCompare(a.x.函釋字號);
+      if (a.k === null) return 1;
+      if (b.k === null) return -1;
+      return b.k - a.k || b.x.函釋字號.localeCompare(a.x.函釋字號);
+    })
+    .map(e => e.x);
+}
+
+// 依「發文日期」新到舊取前 n 則；同一則函釋掛在多條時合併成一筆（條號為陣列）。
+export function getLatestInterps(n: number): LatestInterp[] {
+  latestCache ??= buildLatestList();
+  return latestCache.slice(0, Math.max(0, n));
+}
+
+// ── 「列出最新函釋」意圖判斷 ───────────────────────────────────────────────────
+
+const CN_DIGITS: Record<string, number> = { 一: 1, 二: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+const RECENCY_DEFAULT = 3;
+const RECENCY_MAX = 10;
+
+function parseCount(token: string): number {
+  if (/^\d+$/.test(token)) return Number(token);
+  const ten = token.indexOf('十');
+  if (ten === -1) return CN_DIGITS[token] ?? RECENCY_DEFAULT;
+  const left = ten === 0 ? 1 : (CN_DIGITS[token[0]] ?? 1);
+  const right = ten === token.length - 1 ? 0 : (CN_DIGITS[token[ten + 1]] ?? 0);
+  return left * 10 + right;
+}
+
+// 規則：(1) 要有「最新／最近／近期」（或「新的N則／個」）且提到「函釋」；
+// (2) 去掉數量、功能詞、客套話後不能剩下其他內容——剩下就代表有別的主題詞
+// （例如「第6條」「同意要件」），那仍是內容問題，回 null 交給語意檢索。
+// 回傳筆數：問句有寫就用（1–10），沒寫預設 3。
+export function parseRecencyIntent(query: string): number | null {
+  const q = query.replace(/[\s，,。.！!？?、；;：:「」『』“”"'()（）]/g, '');
+  const newerWord = /最新|最近|近期|新的/.test(q);
+  if (!newerWord || !q.includes('函釋')) return null;
+
+  // 數量：不可緊接在「第」後面（「第6條」是條號，不是筆數）
+  const countRe = /(?<!第)(\d+|[一二兩三四五六七八九十]+)(?:則|個|筆|份|件|條)/;
+  const m = q.match(countRe);
+  const count = m ? Math.min(RECENCY_MAX, Math.max(1, parseCount(m[1]))) : RECENCY_DEFAULT;
+
+  let rest = q.replace(countRe, '');
+  rest = rest.replace(
+    /個人資料保護委員會|個資法|個資|pdpc|函釋|解釋|最新|最近|近期|新的|公布|發布|發佈|發文|出來|請問|請|麻煩|幫我|幫忙|給我|告訴我|可以|能不能|能否|想要|想|列出|顯示|查詢|查|看|找|有哪些|有什麼|是哪些|是什麼|哪些|什麼|哪幾|目前|現在|所有|全部|一下|嗎|呢|吧|啊|呀|的|有|是|我|你|要|看看|依|按|日期|時間|排序|由新到舊|新到舊/gi,
+    '',
+  );
+  return rest.length === 0 ? count : null;
+}
+
 // ── BM25 ──────────────────────────────────────────────────────────────────────
 
 const K1 = 1.5, B = 0.75;

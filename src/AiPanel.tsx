@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Loader2, ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { search, interpMap, getArticleText } from './lib/search';
+import { search, interpMap, getArticleText, getLatestInterps, parseRecencyIntent } from './lib/search';
 import { findCitedIds, findInvalidCitations, formatCitationNumber } from '../api/_lib/citations';
 
 // 候選中最高的原始語意相似度（cosine）低於此值，視為「查無相關函釋」，不呼叫 LLM（省 token）。
@@ -12,6 +12,11 @@ import { findCitedIds, findInvalidCitations, formatCitationNumber } from '../api
 // 限制：邏輯上相鄰的法域問題（加班費、房租等，實測 0.395–0.440）分不開，仍會送給 LLM，
 // 由提示詞要求它說明資料不足。
 const MIN_SEMANTIC_SIMILARITY = 0.37;
+
+// 對應 api/_lib/validate.ts 的 MAX_CONTEXTS／MAX_ARTICLES／MAX_ARTICLE_NO；超過後端會回 400。
+const MAX_CONTEXTS = 8;
+const MAX_ARTICLES = 8;
+const MAX_ARTICLE_NO = 30;
 
 interface Citation { 函釋字號: string; 條號: string; 來源URL: string }
 interface SourceDoc { 函釋字號: string; 條號: string; 全文: string; 來源URL: string }
@@ -52,34 +57,55 @@ export default function AiPanel({ modelStatus, initError }: Props) {
     setTurns(prev => [...prev, { id, question, status: 'loading' }]);
 
     try {
-      const results = await search(question, 5);
+      // 問題主體是「列出最新函釋」：以發文日期最新的 N 則作為候選，不套用語意相似度門檻。
+      // 後端 contexts 上限 8 筆，N 超過時只取最新 8 則。
+      const recencyCount = parseRecencyIntent(question);
+      let contexts: SourceDoc[];
+      let articleNos: string[];
 
-      if (results.length === 0 || Math.max(...results.map(r => r.semantic)) < MIN_SEMANTIC_SIMILARITY) {
-        setTurns(prev => prev.map(t => t.id === id ? { ...t, status: 'no-match' } : t));
-        return;
+      if (recencyCount !== null) {
+        const latest = getLatestInterps(Math.min(recencyCount, MAX_CONTEXTS));
+        // 一則函釋可能掛多條：條號欄位（上限 30 字）放得下的前幾條，法條原文則涵蓋全部條號
+        contexts = latest.map(l => {
+          let 條號 = l.條號[0];
+          for (const no of l.條號.slice(1)) {
+            if (`${條號}、${no}`.length > MAX_ARTICLE_NO) break;
+            條號 = `${條號}、${no}`;
+          }
+          return { 函釋字號: l.函釋字號, 條號, 全文: l.全文, 來源URL: l.來源URL };
+        });
+        articleNos = [...new Set(latest.flatMap(l => l.條號))];
+      } else {
+        const results = await search(question, 5);
+
+        if (results.length === 0 || Math.max(...results.map(r => r.semantic)) < MIN_SEMANTIC_SIMILARITY) {
+          setTurns(prev => prev.map(t => t.id === id ? { ...t, status: 'no-match' } : t));
+          return;
+        }
+
+        // 同一則函釋可能同時掛在多條之下，top-5 結果去重，避免同一函釋重複佔位、
+        // 也避免把重複的全文送給 LLM 浪費 token
+        const seen = new Set<string>();
+        contexts = results
+          .map(r => {
+            const data = interpMap.get(r.函釋字號);
+            if (!data) return null;
+            // 條號用 r.條號（這次搜尋實際命中的那條），不要用 interpMap 查到的
+            // 條號——同一則函釋可能掛在多條之下，interpMap 用函釋字號去重時
+            // 後面的條號會覆蓋前面的，不代表這次語意比對命中的是哪一條。
+            return { 函釋字號: r.函釋字號, 條號: r.條號, 全文: data.全文, 來源URL: data.來源URL };
+          })
+          .filter((c): c is NonNullable<typeof c> => {
+            if (c === null || seen.has(c.函釋字號)) return false;
+            seen.add(c.函釋字號);
+            return true;
+          });
+        articleNos = [...new Set(contexts.map(c => c.條號))];
       }
 
-      // 同一則函釋可能同時掛在多條之下，top-5 結果去重，避免同一函釋重複佔位、
-      // 也避免把重複的全文送給 LLM 浪費 token
-      const seen = new Set<string>();
-      const contexts = results
-        .map(r => {
-          const data = interpMap.get(r.函釋字號);
-          if (!data) return null;
-          // 條號用 r.條號（這次搜尋實際命中的那條），不要用 interpMap 查到的
-          // 條號——同一則函釋可能掛在多條之下，interpMap 用函釋字號去重時
-          // 後面的條號會覆蓋前面的，不代表這次語意比對命中的是哪一條。
-          return { 函釋字號: r.函釋字號, 條號: r.條號, 全文: data.全文, 來源URL: data.來源URL };
-        })
-        .filter((c): c is NonNullable<typeof c> => {
-          if (c === null || seen.has(c.函釋字號)) return false;
-          seen.add(c.函釋字號);
-          return true;
-        });
-
       // 送給 Gemini 的法條原文：本次候選函釋涉及的條號各取一次，避免重複
-      const articleNos = [...new Set(contexts.map(c => c.條號))];
       const articles = articleNos
+        .slice(0, MAX_ARTICLES)
         .map(條號 => {
           const 條文內容 = getArticleText(條號);
           return 條文內容 ? { 條號, 條文內容 } : null;
